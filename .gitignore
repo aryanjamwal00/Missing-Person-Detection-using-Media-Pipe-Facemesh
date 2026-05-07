@@ -1,0 +1,15 @@
+*.pyc
+__pycache__
+.DS_Store
+.venv/
+*.log
+sqlite_database.db
+classifier.pkl
+login_config.yml
+.env
+resources/*.jpg
+resources/*.jpeg
+resources/*.png
+face_landmarker.task
+classifier_cache.txt
+CLAUDE.md

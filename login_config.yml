@@ -1,0 +1,18 @@
+# https://blog.streamlit.io/streamlit-authenticator-part-1-adding-an-authentication-component-to-your-app/
+
+credentials:
+  usernames:
+    aryan123:
+      email: gaganmanku96@gmail.com
+      name: Missing Person Detection
+      city: 560111
+      area: KumarSwamy Layout
+      role: Admin
+      password: '$2b$12$p5kkF92W0B039NHQyxFpGOOINKks3ZBZ5CTFpCetbsxJRJ7heuAhm' # aryan@123
+cookie:
+  expiry_days: 1
+  key: aryan123_missing_person_detection_cookie_key
+  name: missing_person_detection_cookie
+preauthorized:
+  emails:
+  - gaganmanku96@gmail.com

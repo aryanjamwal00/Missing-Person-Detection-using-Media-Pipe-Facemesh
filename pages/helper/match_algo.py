@@ -95,7 +95,7 @@ from sklearn.neighbors import KNeighborsClassifier
 from sklearn.preprocessing import LabelEncoder
 
 
-def match(distance_threshold=0.01, margin_threshold=0.02):
+def match(distance_threshold=0.08, margin_threshold=0.01):
     matched_images = defaultdict(list)
     public_cases_df = get_public_cases_data()
     registered_cases_df = get_registered_cases_data()
@@ -133,7 +133,7 @@ def match(distance_threshold=0.01, margin_threshold=0.02):
             )
             margin = second_distance - closest_distance
 
-            # Require both a very strong match and a clear gap from the next candidate.
+            # Require both a strong match and a clear gap from the next candidate.
             if closest_distance <= distance_threshold and margin >= margin_threshold:
                 reg_label = original_reg_labels[predicted_idx]
                 matched_images[reg_label].append((pub_label, float(closest_distance)))

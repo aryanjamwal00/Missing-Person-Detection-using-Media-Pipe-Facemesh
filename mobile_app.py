@@ -4,6 +4,7 @@ import json
 import tempfile
 
 import streamlit as st
+from PIL import Image
 
 from pages.helper import db_queries
 from pages.helper.data_models import PublicSubmissions
@@ -177,8 +178,9 @@ else:
                         st.error(err)
                 else:
                     count = 0
-                    for landmarks, _ in extracted_faces:
+                    for landmarks, frame_rgb in extracted_faces:
                         sub_id = str(uuid.uuid4())
+                        Image.fromarray(frame_rgb).save(f"./resources/{sub_id}.jpg")
                         details = PublicSubmissions(
                             submitted_by=sub_name.strip(),
                             location=address.strip(),

@@ -13,6 +13,12 @@ from pages.helper.utils import (
     extract_face_mesh_landmarks,
     extract_unique_faces_from_video,
 )
+from pages.helper.validators import (
+    Validators,
+    validate_public_submission_form,
+    ValidationError
+)
+from pages.helper.auth import render_auth_flow
 
 st.set_page_config("Public Submission", initial_sidebar_state="collapsed")
 
@@ -33,6 +39,9 @@ st.markdown(
 )
 
 st.title("Report a Sighting")
+
+# Security verification - but don't block the entire page
+is_authenticated = render_auth_flow(required=False)
 
 upload_mode = st.radio(
     "Upload type",
@@ -55,25 +64,35 @@ if upload_mode == "Image":
             "Upload photo", type=["jpg", "jpeg", "png"], key="user_submission_img"
         )
         if image_obj:
-            unique_id = str(uuid.uuid4())
-
             with st.spinner("Processing..."):
-                uploaded_file_path = "./resources/" + unique_id + ".jpg"
-                with open(uploaded_file_path, "wb") as f:
-                    f.write(image_obj.read())
+                try:
+                    uploaded_file_path, unique_id = Validators.validate_file_upload(
+                        image_obj,
+                        Validators.ALLOWED_IMAGE_TYPES,
+                        Validators.MAX_IMAGE_SIZE,
+                        "Photo"
+                    )
+                    
+                    with open(uploaded_file_path, "wb") as f:
+                        f.write(image_obj.read())
 
-                image_obj.seek(0)
-                st.image(image_obj, width=200)
-                image_obj.seek(0)
-                image_numpy = image_obj_to_numpy(image_obj)
-                face_mesh = extract_face_mesh_landmarks(image_numpy)
+                    image_obj.seek(0)
+                    st.image(image_obj, width=200)
+                    image_obj.seek(0)
+                    image_numpy = image_obj_to_numpy(image_obj)
+                    face_mesh = extract_face_mesh_landmarks(image_numpy)
 
-                if face_mesh is None:
-                    if uploaded_file_path and os.path.exists(uploaded_file_path):
-                        os.remove(uploaded_file_path)
-                else:
-                    face_detected = True
-                    st.success("✅ Face detected.")
+                    if face_mesh is None:
+                        if uploaded_file_path and os.path.exists(uploaded_file_path):
+                            os.remove(uploaded_file_path)
+                    else:
+                        face_detected = True
+                        st.success("✅ Face detected.")
+                except ValidationError as e:
+                    st.error(f"❌ {str(e)}")
+                    face_detected = False
+                    unique_id = None
+                    uploaded_file_path = None
 
     if image_obj and face_detected:
         with form_col.form(key="image_submission_form"):
@@ -86,31 +105,33 @@ if upload_mode == "Image":
             submit_bt = st.form_submit_button("Submit")
 
             if submit_bt:
-                errors = []
-                if not sub_name.strip():
-                    errors.append("❌ Your Name is required.")
-                if not mobile_number.strip():
-                    errors.append("❌ Mobile Number is required.")
-                elif (
-                    not mobile_number.strip().isdigit()
-                    or len(mobile_number.strip()) != 10
-                ):
-                    errors.append("❌ Mobile Number must be exactly 10 digits.")
-                if not address.strip():
-                    errors.append("❌ Location is required.")
-
-                if errors:
+                # Check authentication before submission
+                if not is_authenticated:
+                    st.error("❌ Please complete the security verification first")
+                    st.stop()
+                
+                form_data = {
+                    'sub_name': sub_name,
+                    'mobile_number': mobile_number,
+                    'email': email,
+                    'address': address,
+                    'birth_marks': birth_marks,
+                }
+                
+                is_valid, errors, sanitized_data = validate_public_submission_form(form_data)
+                
+                if not is_valid:
                     for err in errors:
-                        st.error(err)
+                        st.error(f"❌ {err}")
                 else:
                     details = PublicSubmissions(
-                        submitted_by=sub_name.strip(),
-                        location=address.strip(),
-                        email=email.strip() or None,
+                        submitted_by=sanitized_data['sub_name'],
+                        location=sanitized_data['address'],
+                        email=sanitized_data['email'],
                         face_mesh=json.dumps(face_mesh),
                         id=unique_id,
-                        mobile=mobile_number.strip(),
-                        birth_marks=birth_marks.strip() or None,
+                        mobile=sanitized_data['mobile_number'],
+                        birth_marks=sanitized_data['birth_marks'],
                         status="NF",
                     )
                     db_queries.new_public_case(details)
@@ -127,14 +148,26 @@ else:
         )
         if video_obj:
             with st.spinner("Extracting faces from video..."):
-                # Save to temp file so OpenCV can read it
-                suffix = "." + video_obj.name.rsplit(".", 1)[-1]
-                with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
-                    tmp.write(video_obj.read())
-                    tmp_path = tmp.name
+                try:
+                    # Validate video file
+                    uploaded_file_path, unique_id = Validators.validate_file_upload(
+                        video_obj,
+                        Validators.ALLOWED_VIDEO_TYPES,
+                        Validators.MAX_VIDEO_SIZE,
+                        "Video"
+                    )
+                    
+                    # Save to temp file so OpenCV can read it
+                    suffix = "." + video_obj.name.rsplit(".", 1)[-1]
+                    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+                        tmp.write(video_obj.read())
+                        tmp_path = tmp.name
 
-                extracted_faces = extract_unique_faces_from_video(tmp_path)
-                os.unlink(tmp_path)
+                    extracted_faces = extract_unique_faces_from_video(tmp_path)
+                    os.unlink(tmp_path)
+                except ValidationError as e:
+                    st.error(f"❌ {str(e)}")
+                    extracted_faces = []
 
                 if not extracted_faces:
                     st.error(
@@ -160,35 +193,37 @@ else:
             submit_bt = st.form_submit_button(f"Submit {len(extracted_faces)} face(s)")
 
             if submit_bt:
-                errors = []
-                if not sub_name.strip():
-                    errors.append("❌ Your Name is required.")
-                if not mobile_number.strip():
-                    errors.append("❌ Mobile Number is required.")
-                elif (
-                    not mobile_number.strip().isdigit()
-                    or len(mobile_number.strip()) != 10
-                ):
-                    errors.append("❌ Mobile Number must be exactly 10 digits.")
-                if not address.strip():
-                    errors.append("❌ Location is required.")
-
-                if errors:
+                # Check authentication before submission
+                if not is_authenticated:
+                    st.error("❌ Please complete the security verification first")
+                    st.stop()
+                
+                form_data = {
+                    'sub_name': sub_name,
+                    'mobile_number': mobile_number,
+                    'email': email,
+                    'address': address,
+                    'birth_marks': birth_marks,
+                }
+                
+                is_valid, errors, sanitized_data = validate_public_submission_form(form_data)
+                
+                if not is_valid:
                     for err in errors:
-                        st.error(err)
+                        st.error(f"❌ {err}")
                 else:
                     count = 0
                     for landmarks, frame_rgb in extracted_faces:
                         sub_id = str(uuid.uuid4())
                         Image.fromarray(frame_rgb).save(f"./resources/{sub_id}.jpg")
                         details = PublicSubmissions(
-                            submitted_by=sub_name.strip(),
-                            location=address.strip(),
-                            email=email.strip() or None,
+                            submitted_by=sanitized_data['sub_name'],
+                            location=sanitized_data['address'],
+                            email=sanitized_data['email'],
                             face_mesh=json.dumps(landmarks),
                             id=sub_id,
-                            mobile=mobile_number.strip(),
-                            birth_marks=birth_marks.strip() or None,
+                            mobile=sanitized_data['mobile_number'],
+                            birth_marks=sanitized_data['birth_marks'],
                             status="NF",
                         )
                         db_queries.new_public_case(details)

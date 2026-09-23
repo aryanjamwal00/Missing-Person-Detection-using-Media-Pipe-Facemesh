@@ -101,7 +101,7 @@ Case Details:
   Last Seen : {last_seen}
   Case ID   : {case_id}
 
-Please log in to the Missing Person Tracking System to review and confirm the match.
+Please log in to the Missing Person Tracking System to review the match details.
 
 --
 This is an automated notification. Please do not reply to this email.

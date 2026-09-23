@@ -12,6 +12,9 @@ warnings.filterwarnings(action="ignore")
 
 
 from pages.helper import db_queries
+from pages.helper.logging_config import get_logger, log_exception, ErrorHandler
+
+logger = get_logger(__name__)
 
 
 def normalize_face_mesh(face_mesh):
@@ -95,52 +98,69 @@ from sklearn.neighbors import KNeighborsClassifier
 from sklearn.preprocessing import LabelEncoder
 
 
-def match(distance_threshold=0.08, margin_threshold=0.01):
-    matched_images = defaultdict(list)
-    public_cases_df = get_public_cases_data()
-    registered_cases_df = get_registered_cases_data()
+def match(distance_threshold=0.18, margin_threshold=0.01):
+    try:
+        logger.info(f"Starting face matching with thresholds: distance={distance_threshold}, margin={margin_threshold}")
+        matched_images = defaultdict(list)
+        public_cases_df = get_public_cases_data()
+        registered_cases_df = get_registered_cases_data()
 
-    if public_cases_df is None or registered_cases_df is None:
-        return {"status": False, "message": "Couldn't connect to database"}
-    if len(public_cases_df) == 0 or len(registered_cases_df) == 0:
-        return {"status": False, "message": "No public or registered cases found"}
+        if public_cases_df is None or registered_cases_df is None:
+            logger.warning("Couldn't connect to database for matching")
+            return {"status": False, "message": "Couldn't connect to database"}
+        if len(public_cases_df) == 0 or len(registered_cases_df) == 0:
+            logger.info("No public or registered cases found for matching")
+            return {"status": False, "message": "No public or registered cases found"}
 
-    # Store original labels before encoding
-    original_reg_labels = registered_cases_df.iloc[:, 0].tolist()
-    original_pub_labels = public_cases_df.iloc[:, 0].tolist()
+        # Store original labels before encoding
+        original_reg_labels = registered_cases_df.iloc[:, 0].tolist()
+        original_pub_labels = public_cases_df.iloc[:, 0].tolist()
 
-    # Prepare normalized landmark features - use index positions as labels.
-    reg_features = _feature_matrix(registered_cases_df, start_col=2)
+        # Prepare normalized landmark features - use index positions as labels.
+        reg_features = _feature_matrix(registered_cases_df, start_col=2)
 
-    # For each public submission, find the closest registered case
-    for enum_idx, (df_idx, row) in enumerate(public_cases_df.iterrows()):
-        pub_label = original_pub_labels[enum_idx]  # Use enumeration index, not df index
-        face_encoding = normalize_face_mesh(np.array(row[1:]).astype(float))
+        # For each public submission, find the closest registered case
+        for enum_idx, (df_idx, row) in enumerate(public_cases_df.iterrows()):
+            pub_label = original_pub_labels[enum_idx]  # Use enumeration index, not df index
+            face_encoding = normalize_face_mesh(np.array(row[1:]).astype(float))
 
-        try:
-            similarities = reg_features @ face_encoding / (
-                np.linalg.norm(reg_features, axis=1) * np.linalg.norm(face_encoding)
-            )
-            distances = 1.0 - similarities
-            ranked_indices = np.argsort(distances)
+            try:
+                similarities = reg_features @ face_encoding / (
+                    np.linalg.norm(reg_features, axis=1) * np.linalg.norm(face_encoding)
+                )
+                distances = 1.0 - similarities
+                ranked_indices = np.argsort(distances)
 
-            predicted_idx = int(ranked_indices[0])
-            closest_distance = float(distances[predicted_idx])
-            second_distance = (
-                float(distances[int(ranked_indices[1])])
-                if len(ranked_indices) > 1
-                else 1.0
-            )
-            margin = second_distance - closest_distance
+                predicted_idx = int(ranked_indices[0])
+                closest_distance = float(distances[predicted_idx])
+                has_multiple_registered_cases = len(ranked_indices) > 1
+                second_distance = (
+                    float(distances[int(ranked_indices[1])])
+                    if has_multiple_registered_cases
+                    else None
+                )
+                margin = (
+                    second_distance - closest_distance
+                    if second_distance is not None
+                    else float("inf")
+                )
 
-            # Require both a strong match and a clear gap from the next candidate.
-            if closest_distance <= distance_threshold and margin >= margin_threshold:
-                reg_label = original_reg_labels[predicted_idx]
-                matched_images[reg_label].append((pub_label, float(closest_distance)))
-        except Exception as e:
-            continue
+                # Require a strong match. When there is more than one registered case,
+                # also require a clear gap from the next candidate.
+                if closest_distance <= distance_threshold and margin >= margin_threshold:
+                    reg_label = original_reg_labels[predicted_idx]
+                    matched_images[reg_label].append((pub_label, float(closest_distance)))
+                    logger.info(f"Potential match found: {reg_label} <-> {pub_label} (distance: {closest_distance:.4f})")
+            except Exception as e:
+                log_exception(logger, e, f"Processing public case {pub_label}")
+                continue
 
-    return {"status": True, "result": matched_images}
+        logger.info(f"Matching complete. Found {len(matched_images)} potential matches")
+        return {"status": True, "result": matched_images}
+    except Exception as e:
+        log_exception(logger, e, "Face matching process")
+        ErrorHandler.handle_error(e, "Face matching failed", logger, reraise=False)
+        return {"status": False, "message": "Face matching failed due to an error"}
 
 
 if __name__ == "__main__":

@@ -7,6 +7,11 @@ import streamlit as st
 from pages.helper.data_models import RegisteredCases
 from pages.helper import db_queries
 from pages.helper.utils import image_obj_to_numpy, detect_all_faces, draw_face_boxes
+from pages.helper.validators import (
+    Validators,
+    validate_case_registration_form,
+    ValidationError
+)
 
 st.set_page_config(page_title="Register New Case")
 
@@ -33,20 +38,30 @@ elif st.session_state["login_status"]:
 
             if st.session_state.get("nc_file_key") != file_key:
                 # New image uploaded — run detection and cache results
-                unique_id = str(uuid.uuid4())
-                uploaded_file_path = "./resources/" + unique_id + ".jpg"
+                try:
+                    uploaded_file_path, unique_id = Validators.validate_file_upload(
+                        image_obj,
+                        Validators.ALLOWED_IMAGE_TYPES,
+                        Validators.MAX_IMAGE_SIZE,
+                        "Photo"
+                    )
+                    
+                    with open(uploaded_file_path, "wb") as f:
+                        f.write(image_obj.read())
+                    image_obj.seek(0)
 
-                with open(uploaded_file_path, "wb") as f:
-                    f.write(image_obj.read())
-                image_obj.seek(0)
-
-                with st.spinner("Detecting faces..."):
-                    image_numpy = image_obj_to_numpy(image_obj)
-                    faces = detect_all_faces(image_numpy, max_faces=5)
+                    with st.spinner("Detecting faces..."):
+                        image_numpy = image_obj_to_numpy(image_obj)
+                        faces = detect_all_faces(image_numpy, max_faces=5)
+                except ValidationError as e:
+                    st.error(f"❌ {str(e)}")
+                    faces = []
+                    unique_id = None
+                    uploaded_file_path = None
 
                 if not faces:
                     # Clean up orphaned image
-                    if os.path.exists(uploaded_file_path):
+                    if uploaded_file_path and os.path.exists(uploaded_file_path):
                         os.remove(uploaded_file_path)
                     st.session_state["nc_file_key"] = file_key
                     st.session_state["nc_faces"] = []
@@ -74,7 +89,7 @@ elif st.session_state["login_status"]:
             elif len(faces) == 1:
                 # Single face — highlight and auto-select
                 annotated = draw_face_boxes(image_numpy, faces, selected_idx=0)
-                st.image(annotated, use_container_width=True)
+                st.image(annotated, width="stretch")
                 st.success("✅ 1 face detected.")
                 selected_face_idx = 0
             else:
@@ -90,7 +105,7 @@ elif st.session_state["login_status"]:
                 annotated = draw_face_boxes(
                     image_numpy, faces, selected_idx=selected_face_idx
                 )
-                st.image(annotated, use_container_width=True)
+                st.image(annotated, width="stretch")
                 st.info(f"Using **Face {selected_face_idx + 1}** for registration.")
         else:
             # File uploader cleared — reset cached state
@@ -130,51 +145,45 @@ elif st.session_state["login_status"]:
             submit_bt = st.form_submit_button("Save Case")
 
             if submit_bt:
-                errors = []
-                if not name.strip():
-                    errors.append("❌ Name is required.")
-                if not last_seen.strip():
-                    errors.append("❌ Last Seen location is required.")
-                if not complainant_name.strip():
-                    errors.append("❌ Complainant Name is required.")
-                if not complainant_phone.strip():
-                    errors.append("❌ Complainant Phone is required.")
-                elif (
-                    not complainant_phone.strip().isdigit()
-                    or len(complainant_phone.strip()) != 10
-                ):
-                    errors.append("❌ Complainant Phone must be exactly 10 digits.")
-                if mobile_number.strip() and (
-                    not mobile_number.strip().isdigit()
-                    or len(mobile_number.strip()) != 10
-                ):
-                    errors.append("❌ Mobile Number must be exactly 10 digits.")
-                if adhaar_card.strip() and (
-                    not adhaar_card.strip().isdigit() or len(adhaar_card.strip()) != 12
-                ):
-                    errors.append("❌ Aadhaar Card must be exactly 12 digits.")
-
-                if errors:
+                form_data = {
+                    'name': name,
+                    'father_name': father_name,
+                    'age': age,
+                    'mobile_number': mobile_number,
+                    'adhaar_card': adhaar_card,
+                    'address': address,
+                    'city': city,
+                    'birthmarks': birthmarks,
+                    'last_seen': last_seen,
+                    'description': description,
+                    'complainant_name': complainant_name,
+                    'complainant_phone': complainant_phone,
+                    'complainant_email': complainant_email,
+                }
+                
+                is_valid, errors, sanitized_data = validate_case_registration_form(form_data)
+                
+                if not is_valid:
                     for err in errors:
-                        st.error(err)
+                        st.error(f"❌ {err}")
                 else:
                     selected_landmarks = faces[selected_face_idx]["landmarks"]
                     new_case_details = RegisteredCases(
                         id=unique_id,
                         submitted_by=user,
-                        name=name.strip(),
-                        father_name=father_name.strip(),
-                        age=str(age),
-                        complainant_mobile=complainant_phone.strip(),
-                        complainant_name=complainant_name.strip(),
-                        complainant_email=complainant_email.strip() or None,
+                        name=sanitized_data['name'],
+                        father_name=sanitized_data['father_name'],
+                        age=sanitized_data['age'],
+                        complainant_mobile=sanitized_data['complainant_phone'],
+                        complainant_name=sanitized_data['complainant_name'],
+                        complainant_email=sanitized_data['complainant_email'],
                         face_mesh=json.dumps(selected_landmarks),
-                        adhaar_card=adhaar_card.strip(),
-                        birth_marks=birthmarks.strip(),
-                        address=address.strip(),
-                        city=city.strip() or None,
-                        last_seen=last_seen.strip(),
-                        description=description.strip() or None,
+                        adhaar_card=sanitized_data['adhaar_card'],
+                        birth_marks=sanitized_data['birthmarks'],
+                        address=sanitized_data['address'],
+                        city=sanitized_data['city'],
+                        last_seen=sanitized_data['last_seen'],
+                        description=sanitized_data['description'],
                         status="NF",
                         matched_with="",
                     )

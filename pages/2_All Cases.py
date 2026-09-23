@@ -6,6 +6,10 @@ from pages.helper import db_queries, emailer
 PAGE_SIZE = 10
 
 
+def display_status(value):
+    return {"F": "Match Found", "NF": "Not Found"}.get(value, value)
+
+
 def _reset_page(key: str):
     """Reset pagination when filters change."""
     st.session_state[key] = 0
@@ -36,16 +40,15 @@ def case_viewer(case, is_admin: bool = False):
     for label, value in zip(["Name", "Age", "Status", "Last Seen"], case):
         if value == "F":
             status_value = "F"
-            value = "Found"
+            value = display_status(value)
         elif value == "NF":
-            value = "Not Found"
+            value = display_status(value)
         data_col.write(f"**{label}:** {value}")
 
     try:
         image_col.image(
             "./resources/" + str(case_id) + ".jpg",
             width=120,
-            use_container_width=False,
         )
     except Exception:
         image_col.caption("No image")
@@ -121,14 +124,13 @@ def public_case_viewer(case: list) -> None:
         case,
     ):
         if label == "Status":
-            value = "Found" if value == "F" else "Not Found"
+            value = display_status(value)
         data_col.write(f"**{label}:** {value}")
 
     try:
         image_col.image(
             "./resources/" + case_id + ".jpg",
             width=120,
-            use_container_width=False,
         )
     except Exception:
         image_col.caption("No image")
@@ -227,9 +229,7 @@ elif st.session_state["login_status"]:
                     "Submitted By",
                 ],
             )
-            df["Status"] = (
-                df["Status"].map({"F": "Found", "NF": "Not Found"}).fillna(df["Status"])
-            )
+            df["Status"] = df["Status"].apply(display_status)
             st.download_button(
                 "📥 Download as CSV",
                 data=df.to_csv(index=False),
@@ -247,7 +247,8 @@ elif st.session_state["login_status"]:
 
     # ── Registered Cases view ─────────────────────────────────────────────────
     else:
-        cases_data = list(db_queries.fetch_registered_cases(user, status))
+        submitted_by = None if is_admin else user
+        cases_data = list(db_queries.fetch_registered_cases(submitted_by, status))
 
         if search_name:
             cases_data = [
@@ -273,9 +274,10 @@ elif st.session_state["login_status"]:
                         RegisteredCases.last_seen,
                         RegisteredCases.matched_with,
                     )
-                    .where(RegisteredCases.submitted_by == user)
                     .where(RegisteredCases.submitted_on >= date_dt)
                 )
+                if not is_admin:
+                    q = q.where(RegisteredCases.submitted_by == user)
                 if status != "All":
                     status_filter = "F" if status == "Found" else "NF"
                     q = q.where(RegisteredCases.status == status_filter)
@@ -291,9 +293,7 @@ elif st.session_state["login_status"]:
                 cases_data,
                 columns=["ID", "Name", "Age", "Status", "Last Seen", "Matched With"],
             )
-            df["Status"] = (
-                df["Status"].map({"F": "Found", "NF": "Not Found"}).fillna(df["Status"])
-            )
+            df["Status"] = df["Status"].apply(display_status)
             st.download_button(
                 "📥 Download as CSV",
                 data=df.to_csv(index=False),

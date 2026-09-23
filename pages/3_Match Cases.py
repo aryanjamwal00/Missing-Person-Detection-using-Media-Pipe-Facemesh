@@ -8,7 +8,12 @@ def confidence_from_distance(distance: float) -> float:
     return max(0.0, min(100.0, (1.0 - distance) * 100))
 
 
-def case_viewer(registered_case_id: str, public_case_id: str, confidence: float = None):
+def case_viewer(
+    registered_case_id: str,
+    public_case_id: str,
+    confidence: float = None,
+    email_result=None,
+):
     try:
         case_details = db_queries.get_registered_case_detail(registered_case_id)[0]
         public_details = db_queries.get_public_case_detail(public_case_id)
@@ -29,14 +34,15 @@ def case_viewer(registered_case_id: str, public_case_id: str, confidence: float 
 
         if confidence is not None:
             data_col.write("")
-            data_col.markdown("**Match Confidence**")
-            data_col.progress(confidence / 100, text=f"{confidence:.0f}% confidence")
+            data_col.success(f"Match Found - {confidence:.0f}% accuracy")
+            data_col.progress(confidence / 100, text=f"{confidence:.0f}% accuracy")
+        else:
+            data_col.success("Match Found")
 
         try:
             reg_image_col.image(
                 "./resources/" + registered_case_id + ".jpg",
                 width=100,
-                use_container_width=False,
             )
             reg_image_col.caption("Registered case")
         except Exception as img_err:
@@ -46,7 +52,6 @@ def case_viewer(registered_case_id: str, public_case_id: str, confidence: float 
             public_col.image(
                 "./resources/" + public_case_id + ".jpg",
                 width=100,
-                use_container_width=False,
             )
             public_col.caption("Public submission")
         except Exception:
@@ -58,22 +63,10 @@ def case_viewer(registered_case_id: str, public_case_id: str, confidence: float 
             public_col.write(f"**Mobile:** {public_details[2]}")
             public_col.write(f"**Birth Marks:** {public_details[3]}")
 
-        st.info("Possible match found. Review both images before confirming.")
-        if st.button(
-            "Confirm Match",
-            key=f"confirm_{registered_case_id}_{public_case_id}",
-            type="primary",
-        ):
-            db_queries.update_found_status(registered_case_id, public_case_id)
-            st.success("Status updated. Case is now marked as Found.")
-
-            email_result = emailer.send_match_notification(
-                registered_case_id, case_details
-            )
-            if email_result:
-                st.info(f"Notification sent to {email_result.recipient}")
-            else:
-                st.warning(email_result.message)
+        if email_result:
+            st.info(f"Notification sent to {email_result.recipient}")
+        elif email_result is not None:
+            st.warning(email_result.message)
 
     except Exception as e:
         import traceback
@@ -113,7 +106,21 @@ elif st.session_state["login_status"]:
                                 submitted_case_id = submitted_case
                                 conf = None
 
-                            case_viewer(matched_id, submitted_case_id, conf)
+                            case_details = db_queries.get_registered_case_detail(
+                                matched_id
+                            )[0]
+                            db_queries.update_found_status(
+                                matched_id, submitted_case_id
+                            )
+                            email_result = emailer.send_match_notification(
+                                matched_id, case_details
+                            )
+                            case_viewer(
+                                matched_id,
+                                submitted_case_id,
+                                conf,
+                                email_result=email_result,
+                            )
                             st.write("---")
                 else:
                     st.info("No confident matches found.")

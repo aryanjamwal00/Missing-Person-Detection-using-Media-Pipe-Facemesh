@@ -70,8 +70,8 @@ elif st.session_state["login_status"]:
         )
         st.stop()
 
-    # Build map centered on India
-    m = folium.Map(location=[20.5937, 78.9629], zoom_start=5, tiles="CartoDB positron")
+    # Build map centered on India using OpenStreetMap (free, no API key required)
+    m = folium.Map(location=[20.5937, 78.9629], zoom_start=5, tiles="OpenStreetMap")
 
     placed = 0
     skipped = []
@@ -140,7 +140,7 @@ elif st.session_state["login_status"]:
     import pandas as pd
 
     df = pd.DataFrame(rows).sort_values("Total", ascending=False).reset_index(drop=True)
-    st.dataframe(df, use_container_width=True)
+    st.dataframe(df, width="stretch")
 
 else:
     st.write("You don't have access to this page")

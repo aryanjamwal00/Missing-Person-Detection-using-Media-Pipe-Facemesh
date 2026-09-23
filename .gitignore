@@ -3,6 +3,7 @@ __pycache__
 .DS_Store
 .venv/
 *.log
+logs/
 sqlite_database.db
 classifier.pkl
 login_config.yml

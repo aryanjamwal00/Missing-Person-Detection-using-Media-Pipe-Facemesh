@@ -5,6 +5,7 @@ from yaml import SafeLoader
 import streamlit_authenticator as stauth
 
 from pages.helper import db_queries
+from pages.helper.config_manager import get_config_manager
 
 # Initialise DB once at startup
 db_queries.create_db()
@@ -13,10 +14,13 @@ if "login_status" not in st.session_state:
     st.session_state["login_status"] = False
 
 try:
-    with open("login_config.yml") as file:
-        config = yaml.load(file, Loader=SafeLoader)
-except FileNotFoundError:
-    st.error("Configuration file 'login_config.yml' not found")
+    config_manager = get_config_manager()
+    config = {
+        "credentials": config_manager.get_credentials(),
+        "cookie": config_manager.get_cookie_config()
+    }
+except Exception as e:
+    st.error(f"Configuration error: {str(e)}")
     st.stop()
 
 authenticator = stauth.Authenticate(
@@ -119,8 +123,12 @@ if st.session_state.get("authentication_status"):
     authenticator.logout("Logout", "sidebar")
 
     st.session_state["login_status"] = True
-    user_info = config["credentials"]["usernames"][st.session_state["username"]]
+    user_info = config_manager.get_user_info(st.session_state["username"])
     st.session_state["user"] = st.session_state["username"]
+
+    if not user_info:
+        st.error("User information not found")
+        st.stop()
 
     role = user_info.get("role", "Officer")
     st.session_state["role"] = role
@@ -222,8 +230,11 @@ if st.session_state.get("authentication_status"):
         if not counts:
             st.info("No cases with city data yet. Add a city when registering cases.")
         else:
+            # Use OpenStreetMap tiles (free, no API key required)
             m = folium.Map(
-                location=[20.5937, 78.9629], zoom_start=5, tiles="CartoDB positron"
+                location=[20.5937, 78.9629], 
+                zoom_start=5, 
+                tiles="OpenStreetMap"
             )
 
             for city, data in counts.items():
